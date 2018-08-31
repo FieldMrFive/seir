@@ -1,0 +1,23 @@
+dataset:
+  data_dir: /mnt/truenas/scratch/kuangye.chen/dataset/
+  data_lst: train.txt
+  split: training
+
+training:
+  batch_size: 20
+  shuffle: True
+  optimizer:
+    name: sgd
+    learning_rate: 0.0002
+    momentum: 0.005
+  lr_scheduler:
+    factor: 0.8
+    step: 30000
+  frequent: 20
+  prefix: sier
+  begin_epoch: 0
+  end_epoch: 200
+  file: /mnt/truenas/scratch/kuangye.chen/dataset/train.txt
+
+misc:
+  checkpint_dir: ./model
