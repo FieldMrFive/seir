@@ -20,4 +20,4 @@ training:
   file: /mnt/truenas/scratch/kuangye.chen/dataset/train.txt
 
 misc:
-  checkpint_dir: ./model
+  checkpoint_dir: ./model

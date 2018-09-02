@@ -8,19 +8,21 @@ import mxnet as mx
 from datetime import datetime
 from pprint import pformat
 
+from seir.data import RasterImageDataset
+
 
 def training(cfg_yaml, gpus, log_level):
     params_config = load_yaml(cfg_yaml)
 
     # set up logs and checkpoint dir
     checkpoint_dir = os.path.join(
-        params_config["misc"]["checkpint_dir"], params_config["training"]["prefix"],
+        params_config["misc"]["checkpoint_dir"], params_config["training"]["prefix"],
         datetime.now().strftime("%Y_%m_%d_%H_%M"))
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
 
     # set up logger
-    log_path = os.path.join(checkpoint_dir, "log")
+    log_path = os.path.join(checkpoint_dir, "train.log")
     log_format = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s : %(message)s")
 
     file_handler = logging.FileHandler(filename=log_path)
@@ -43,7 +45,7 @@ def training(cfg_yaml, gpus, log_level):
     ctx = [mx.gpu(gpu) for gpu in gpus]
 
     # load iterator
-    train_iter = TrajIter(config=params_config, num_gpus=len(gpus))
+    train_data = RasterImageDataset(config=params_config)
     multi_gpus_batch_size = params_config["training"]["batch_size"] * len(ctx)
 
     # load symbol

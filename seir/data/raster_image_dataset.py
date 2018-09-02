@@ -1,14 +1,16 @@
-import mxnet as mx
 import numpy as np
 import cv2 as cv
 import os
 from mxnet.gluon.data import Dataset
 
+__all__ = ["RasterImageDataset"]
+
 
 class RasterImageDataset(Dataset):
     def __init__(self, config):
-        self._data_dir = config["dataset"]["data_dir"]
+        super(RasterImageDataset, self).__init__()
 
+        self._data_dir = config["dataset"]["data_dir"]
         self._data_lst = []
         with open(os.path.join(self._data_dir, config["dataset"]["data_lst"])) as fin:
             for line in fin:
