@@ -10,6 +10,7 @@ training:
     name: sgd
     learning_rate: 0.0002
     momentum: 0.005
+    wd: 0.0005
   lr_scheduler:
     factor: 0.8
     step: 30000
