@@ -25,7 +25,7 @@ class RasterImageDataset(Dataset):
         with open(os.path.join(self._data_dir, data_name + ".txt"), "r") as fin:
             for line in fin:
                 label += [float(i) for i in line.strip('\n').split(' ')]
-        return np.array(img, dtype=np.float64), np.array(label, dtype=np.float64)
+        return np.array(img, dtype=np.float32), np.array(label, dtype=np.float32)
 
     def __len__(self):
         return self._length

@@ -24,7 +24,7 @@ class MobileNetV2(nn.HybridBlock):
             [6, 160, 3, 2],
             [6, 320, 1, 1]
         ]
-        self.num_class = 5
+        self.num_class = 10
 
         with self.name_scope():
             self.feature = nn.HybridSequential(prefix="feature_")

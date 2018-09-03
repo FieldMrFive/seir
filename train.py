@@ -8,8 +8,10 @@ import mxnet as mx
 from datetime import datetime
 from pprint import pformat
 
+from seir.core import Trainer
 from seir.data import RasterImageDataset
-
+from seir.models import MobileNetV2
+from seir.utils import Speedometer, do_checkpoint
 
 def training(cfg_yaml, gpus, log_level):
     params_config = load_yaml(cfg_yaml)
@@ -48,8 +50,9 @@ def training(cfg_yaml, gpus, log_level):
     train_data = RasterImageDataset(config=params_config)
     multi_gpus_batch_size = params_config["training"]["batch_size"] * len(ctx)
 
-    # load symbol
-    symbol = get_mobilenetv2_symbol(num_classes=10)
+    # load model
+    net_config = None
+    net = MobileNetV2(net_config)
 
     optimizer_cfg = params_config["training"]["optimizer"]
     lr_scheduler_cfg = params_config["training"]["lr_scheduler"]
@@ -66,29 +69,32 @@ def training(cfg_yaml, gpus, log_level):
         optimizer_params.update({'momentum': optimizer_cfg['momentum']})
 
     # set solver
-    arg_params, aux_params = None, None
-    model = Solver(symbol, ctx=ctx,
-                   begin_epoch=params_config['training']['begin_epoch'],
-                   end_epoch=params_config['training']['end_epoch'],
-                   arg_params=arg_params,
-                   aux_params=aux_params)
-    batch_end_callback = mx.callback.Speedometer(batch_size=params_config['training']['batch_size'],
-                                                 frequent=params_config['training']['frequent'])
-    epoch_end_callback = mx.callback.do_checkpoint(prefix=os.path.join(checkpoint_dir,
-                                                                       params_config['training']['prefix']))
+    trainer = Trainer(net=net,
+                      ctx=ctx,
+                      begin_epoch=params_config['training']['begin_epoch'],
+                      end_epoch=params_config['training']['end_epoch'],
+                      logger=logger)
+
+    batch_end_callback = Speedometer(batch_size=params_config['training']['batch_size'],
+                                     frequent=params_config['training']['frequent'],
+                                     logger=logger)
+    epoch_end_callback = do_checkpoint(prefix=os.path.join(checkpoint_dir, params_config['training']['prefix']),
+                                       logger=logger)
     initializer = mx.init.Xavier(rnd_type='gaussian', factor_type='in', magnitude=2)
 
-    eval_metric = ['acc', 'mse']
+    eval_metric = ['mse']
+    loss = mx.gluon.loss.L2Loss()
 
-    model.fit(prefix=params_config['training']['prefix'],
-              train_data=train_iter,
-              eval_metric=eval_metric,
-              batch_end_callback=batch_end_callback,
-              epoch_end_callback=epoch_end_callback,
-              initializer=initializer,
-              optimizer=optimizer,
-              optimizer_params=optimizer_params,
-              )
+    trainer.train(dataset=train_data,
+                  batch_size=multi_gpus_batch_size,
+                  loss=loss,
+                  eval_metric=eval_metric,
+                  initializer=initializer,
+                  epoch_end_callback=epoch_end_callback,
+                  batch_end_callback=batch_end_callback,
+                  optimizer=optimizer,
+                  optimizer_params=optimizer_params
+                  )
 
 
 def load_yaml(path):

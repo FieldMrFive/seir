@@ -8,6 +8,9 @@ import logging
 BatchEndParam = namedtuple(
     'BatchEndParams', ['epoch', 'nbatch', 'eval_metric'])
 
+__all__ = ["Trainer"]
+
+
 class Trainer(object):
     def __init__(self, net, ctx=None, begin_epoch=0, end_epoch=1000, logger=None):
         self.net = net
@@ -32,8 +35,7 @@ class Trainer(object):
 
         for l in losses:
             l.backward()
-        mx.metric.MSE
-        gluon.loss.L2Loss
+
         metric.update(preds, label)
         trainer.step(batch_data.shape[0])
 
@@ -55,11 +57,17 @@ class Trainer(object):
         for epoch in range(self.begin_epoch, self.end_epoch):
             tic = time.time()
             for i, (data, label) in enumerate(train_data):
-                self.train_batch(data, label, loss, trainer)
+                self.train_batch(data, label, loss, eval_metric, trainer)
 
                 if batch_end_callback is not None:
                     batch_end_params = BatchEndParam(epoch=epoch, nbatch=i, eval_metric=eval_metric)
                     batch_end_callback(batch_end_params)
+
+            toc = time.time()
+            self.logger.info("Epoch[%d] Time cost=%.3f", epoch, toc - tic)
+            if epoch_end_callback is not None:
+                epoch_end_callback(self.net)
+
 
 
 
