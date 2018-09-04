@@ -3,23 +3,20 @@
 import argparse
 import logging
 import os
-import yaml
 import mxnet as mx
-from datetime import datetime
 from pprint import pformat
 
 from seir.core import Trainer
 from seir.data import RasterImageDataset
 from seir.models import MobileNetV2
-from seir.utils import Speedometer, do_checkpoint
+from seir.utils import Speedometer, CheckpointManager, load_yaml
 
-def training(cfg_yaml, gpus, log_level):
+
+def train(cfg_yaml, gpus, log_level):
     params_config = load_yaml(cfg_yaml)
 
     # set up logs and checkpoint dir
-    checkpoint_dir = os.path.join(
-        params_config["misc"]["checkpoint_dir"], params_config["training"]["prefix"],
-        datetime.now().strftime("%Y_%m_%d_%H_%M"))
+    checkpoint_dir = params_config["misc"]["checkpoint_dir"]
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
 
@@ -47,60 +44,58 @@ def training(cfg_yaml, gpus, log_level):
     ctx = [mx.gpu(gpu) for gpu in gpus]
 
     # load iterator
-    train_data = RasterImageDataset(config=params_config)
-    multi_gpus_batch_size = params_config["training"]["batch_size"] * len(ctx)
+    train_data = RasterImageDataset(data_dir=params_config["dataset"]["data_dir"],
+                                    data_lst_file=params_config["dataset"]["train_data_lst"])
+    multi_gpus_batch_size = params_config["train"]["batch_size"] * len(ctx)
 
-    # load model
-    net_config = None
-    net = MobileNetV2(net_config)
+    # Generate and save model
+    net = MobileNetV2(config=params_config["mobilenet_v2"])
+    net.hybridize()
 
-    optimizer_cfg = params_config["training"]["optimizer"]
-    lr_scheduler_cfg = params_config["training"]["lr_scheduler"]
+    optimizer_cfg = params_config["train"]["optimizer"]
+    lr_scheduler_cfg = params_config["train"]["lr_scheduler"]
     optimizer = optimizer_cfg["name"]
     optimizer_params = {
-        'wd': optimizer_cfg['wd'],
-        'learning_rate': optimizer_cfg['learning_rate'],
-        'rescale_grad': 1.0 / multi_gpus_batch_size,
-        'lr_scheduler': mx.lr_scheduler.FactorScheduler(step=lr_scheduler_cfg['step'],
-                                                        factor=lr_scheduler_cfg['factor'],
+        "wd": optimizer_cfg["wd"],
+        "learning_rate": optimizer_cfg["learning_rate"],
+        "rescale_grad": 1.0 / multi_gpus_batch_size,
+        "lr_scheduler": mx.lr_scheduler.FactorScheduler(step=lr_scheduler_cfg["step"],
+                                                        factor=lr_scheduler_cfg["factor"],
                                                         stop_factor_lr=1e-6)
     }
-    if optimizer == 'sgd':
-        optimizer_params.update({'momentum': optimizer_cfg['momentum']})
+    if optimizer == "sgd":
+        optimizer_params.update({"momentum": optimizer_cfg["momentum"]})
 
-    # set solver
-    trainer = Trainer(net=net,
-                      ctx=ctx,
-                      begin_epoch=params_config['training']['begin_epoch'],
-                      end_epoch=params_config['training']['end_epoch'],
-                      logger=logger)
-
-    batch_end_callback = Speedometer(batch_size=params_config['training']['batch_size'],
-                                     frequent=params_config['training']['frequent'],
+    batch_end_callback = Speedometer(batch_size=params_config["train"]["batch_size"],
+                                     frequent=params_config["train"]["log_frequent"],
                                      logger=logger)
-    epoch_end_callback = do_checkpoint(prefix=os.path.join(checkpoint_dir, params_config['training']['prefix']),
-                                       logger=logger)
+    epoch_end_callback = CheckpointManager(path=checkpoint_dir,
+                                           prefix=params_config["misc"]["checkpoint_prefix"],
+                                           num_checkpoint=params_config["misc"]["num_checkpoint"],
+                                           period=params_config["misc"]["checkpoint_period"],
+                                           logger=logger)
     initializer = mx.init.Xavier(rnd_type='gaussian', factor_type='in', magnitude=2)
 
     eval_metric = ['mse']
     loss = mx.gluon.loss.L2Loss()
 
-    trainer.train(dataset=train_data,
-                  batch_size=multi_gpus_batch_size,
-                  loss=loss,
+    # set trainer
+    trainer = Trainer(net=net,
+                      train_dataset=train_data,
+                      batch_size=multi_gpus_batch_size,
+                      shuffle=True,
+                      ctx=ctx,
+                      begin_epoch=params_config["train"]["begin_epoch"],
+                      end_epoch=params_config["train"]["end_epoch"],
+                      logger=logger)
+
+    trainer.train(loss=loss,
                   eval_metric=eval_metric,
                   initializer=initializer,
                   epoch_end_callback=epoch_end_callback,
                   batch_end_callback=batch_end_callback,
                   optimizer=optimizer,
-                  optimizer_params=optimizer_params
-                  )
-
-
-def load_yaml(path):
-    with open(path) as fin:
-        config = yaml.load(fin)
-    return config
+                  optimizer_params=optimizer_params)
 
 
 if __name__ == "__main__":
@@ -112,6 +107,6 @@ if __name__ == "__main__":
     parser.add_argument("--log", type=str, default="INFO",
                         help="Log level to console.")
     args = parser.parse_args()
-    training(cfg_yaml=args.cfg,
-             gpus=args.gpus,
-             log_level=getattr(logging, args.log.upper(), logging.INFO))
+    train(cfg_yaml=args.cfg,
+          gpus=args.gpus,
+          log_level=getattr(logging, args.log.upper(), logging.INFO))

@@ -1,8 +1,9 @@
 import logging
 import time
+import os
 
 __all__ = ["Speedometer",
-           "do_checkpoint"]
+           "CheckpointManager"]
 
 
 class Speedometer(object):
@@ -59,13 +60,32 @@ class Speedometer(object):
             self.tic = time.time()
 
 
-def do_checkpoint(prefix, period=1, logger=logging.getLogger()):
-    period = int(max(1, period))
+class CheckpointManager(object):
+    def __init__(self, path, prefix="model", num_checkpoint=5, period=1, logger=logging.getLogger()):
+        self._period = period
+        self._path = path
+        self._prefix = prefix
+        self._logger = logger
+        self._num_checkpoint = num_checkpoint
 
-    def _callback(iter_no, net):
-        if (iter_no + 1) % period == 0:
-            filename = "-".join([prefix, str(iter_no)])
-            net.save_params(filename)
-            logger.info("Model saved at epoch[%d]", iter_no)
-    return _callback
+    def __call__(self, iter_no, net):
+        if (iter_no + 1) % self._period != 0:
+            return
 
+        net.export(os.path.join(self._path, self._prefix), iter_no)
+        self._logger.info("Model at epoch[%d] saved to %s", iter_no, self._path)
+        self._clean_files()
+
+    def _clean_files(self):
+        file_count = []
+        for filename in os.listdir(self._path):
+            name, ext = os.path.splitext(filename)
+            if ext != ".params":
+                continue
+            file_count.append(int(name.split("-")[1]))
+
+        if len(file_count) > self._num_checkpoint:
+            file_count.sort()
+            for i in range(len(file_count) - self._num_checkpoint):
+                filename = "-".join([self._prefix, "%04d.params" % file_count[i]])
+                os.remove(os.path.join(self._path, filename))

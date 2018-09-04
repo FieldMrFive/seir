@@ -1,4 +1,5 @@
 import mxnet.gluon.nn as nn
+import mxnet as mx
 
 __all__ = ["MobileNetV2",
            "InvertedResidualBlock"]
@@ -15,16 +16,8 @@ class MobileNetV2(nn.HybridBlock):
     def __init__(self, config, **kwargs):
         super(MobileNetV2, self).__init__(**kwargs)
 
-        self.net_config = [
-            [1, 16, 1, 1],
-            [6, 24, 2, 2],
-            [6, 32, 3, 2],
-            [6, 64, 4, 2],
-            [6, 96, 3, 1],
-            [6, 160, 3, 2],
-            [6, 320, 1, 1]
-        ]
-        self.num_class = 10
+        self.net_config = config["net_config"]
+        self.num_output = config["num_output"]
 
         with self.name_scope():
             self.feature = nn.HybridSequential(prefix="feature_")
@@ -45,11 +38,13 @@ class MobileNetV2(nn.HybridBlock):
 
             self.output = nn.HybridSequential(prefix="output_")
             with self.output.name_scope():
-                self.output.add(nn.Conv2D(self.num_class, 1, use_bias=False, prefix="pred_"))
+                self.output.add(nn.Conv2D(self.num_output, 1, use_bias=False, prefix="pred_"))
                 self.output.add(nn.Flatten())
 
-    def hybrid_forward(self, F, x):
+    def hybrid_forward(self, F, x, state):
         x = self.feature(x)
+        state = state.expand_dims(axis=2).expand_dims(axis=3)
+        x = F.concat(x, state, dim=1)
         x = self.output(x)
         return x
 
