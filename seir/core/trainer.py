@@ -33,12 +33,18 @@ class Trainer(object):
             self._logger.setLevel(logging.INFO)
 
     def load_train_data(self, dataset, batch_size, shuffle=True):
-        self._train_data = gluon.data.DataLoader(dataset=dataset, batch_size=batch_size, shuffle=shuffle)
+        self._train_data = gluon.data.DataLoader(dataset=dataset,
+                                                 batch_size=batch_size,
+                                                 shuffle=shuffle,
+                                                 last_batch='rollover')
 
     def load_valid_data(self, dataset, batch_size, shuffle=True):
-        self._valid_data = gluon.data.DataLoader(dataset=dataset, batch_size=batch_size, shuffle=shuffle)
+        self._valid_data = gluon.data.DataLoader(dataset=dataset,
+                                                 batch_size=batch_size,
+                                                 shuffle=shuffle,
+                                                 last_batch='rollover')
 
-    def train_batch(self, batch_data, batch_state, batch_label, loss, metric, trainer):
+    def _train_batch(self, batch_data, batch_state, batch_label, loss, metric, trainer):
         data = gluon.utils.split_and_load(batch_data, self._ctx)
         label = gluon.utils.split_and_load(batch_label, self._ctx)
         state = gluon.utils.split_and_load(batch_state, self._ctx)
@@ -49,10 +55,19 @@ class Trainer(object):
         for l in losses:
             l.backward()
 
-        metric.update(preds, label)
+        metric.update(labels=label, preds=preds)
         trainer.step(batch_data.shape[0])
 
-    def train(self, loss, eval_metric="acc", initializer=mx.init.Uniform(), epoch_end_callback=None,
+    def _valid_once(self, batch_data, batch_state, batch_label, metric):
+        data = gluon.utils.split_and_load(batch_data, self._ctx)
+        label = gluon.utils.split_and_load(batch_label, self._ctx)
+        state = gluon.utils.split_and_load(batch_state, self._ctx)
+
+        preds = [self._net(x1, x2) for x1, x2 in zip(data, state)]
+        mx.nd.waitall()
+        metric.update(labels=label, preds=preds)
+
+    def train(self, loss, eval_metric="acc", eval_frequence = 5, initializer=mx.init.Uniform(), epoch_end_callback=None,
               batch_end_callback=None, optimizer=None, optimizer_params=None, kvstore="local"):
 
         self._net.collect_params().initialize(initializer, self._ctx)
@@ -67,17 +82,29 @@ class Trainer(object):
 
         for epoch in range(self._begin_epoch, self._end_epoch):
             tic = time.time()
+            ts = time.time()
             for i, (data, state, label) in enumerate(self._train_data):
-                self.train_batch(data, state, label, loss, eval_metric, trainer)
-
+                # self._logger.info("load data cost %.4f", time.time() - ts)
+                # ts = time.time()
+                self._train_batch(data, state, label, loss, eval_metric, trainer)
+                # self._logger.info("train batch cost %.4f", time.time() - ts)
+                # ts = time.time()
                 if batch_end_callback is not None:
                     batch_end_params = BatchEndParam(epoch=epoch, nbatch=i, eval_metric=eval_metric)
                     batch_end_callback(batch_end_params)
+                # self._logger.info("batch callback cost %.4f", time.time() - ts)
+                # ts = time.time()
 
+            mx.nd.waitall()
             toc = time.time()
             self._logger.info("Epoch[%d] Time cost=%.3f", epoch, toc - tic)
             if epoch_end_callback is not None:
                 epoch_end_callback(epoch, self._net)
 
-            if self._valid_data is not None:
-                pass
+            if self._valid_data is not None and epoch % eval_frequence == 0:
+                self._logger.info("Validating........")
+                for i, (data, state, label) in enumerate(self._train_data):
+                    self._valid_once(data, state, label, eval_metric)
+                name_value = eval_metric.get_name_value()
+                msg = 'Epoch[%d] Validation ' + '\t%s=%f'*len(name_value)
+                self._logger.info(msg, epoch, *sum(name_value, ()))

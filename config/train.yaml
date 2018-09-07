@@ -1,6 +1,9 @@
 dataset:
-  data_dir: /mnt/truenas/scratch/kuangye.chen/dataset/
+  resolution: 0.2
+  horizon: 30
+  data_dir: /home/field/dataset/
   train_data_lst: train.txt
+  valid_data_lst: valid.txt
 
 mobilenet_v2:
   net_config:
@@ -14,7 +17,7 @@ mobilenet_v2:
   num_output: 60
 
 train:
-  batch_size: 20
+  batch_size: 5
   shuffle: True
   optimizer:
     name: adam
@@ -23,13 +26,13 @@ train:
     wd: 0.0005
   lr_scheduler:
     factor: 0.9
-    step: 600
+    step: 1000
   log_frequent: 20
-  begin_epoch: 0
-  end_epoch: 200
+  begin_epoch: 1
+  end_epoch: 300
 
 misc:
   checkpoint_dir: ./model
   checkpoint_prefix: mobilenet
   checkpoint_period: 1
-  num_checkpoint: 20
+  num_checkpoint: 50

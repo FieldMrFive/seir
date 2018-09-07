@@ -7,7 +7,7 @@ import mxnet as mx
 import numpy as np
 import cv2 as cv
 
-from seir.utils import load_yaml
+from seir.utils import *
 from seir.data import RasterImageDataset
 
 
@@ -34,36 +34,41 @@ def eval(cfg_yaml, checkpoint, log_level):
     logger.addHandler(console_handler)
     logger.addHandler(file_handler)
 
-    train_data = RasterImageDataset(data_dir=params_config["dataset"]["data_dir"],
-                                    data_lst_file=params_config["dataset"]["train_data_lst"])
+    eval_dataset = RasterImageDataset(data_dir=params_config["dataset"]["data_dir"],
+                                      data_lst_file=params_config["dataset"]["train_data_lst"])
+    resolution = params_config["dataset"]["resolution"]
+    horizon = params_config["dataset"]["horizon"]
 
     net = mx.gluon.nn.SymbolBlock.imports(symbol_file=prefix + "-symbol.json",
                                           input_names=["data0", "data1"],
                                           param_file=prefix + "-%04d.params" % checkpoint)
 
-    for i in range(40, len(train_data)):
-        data, state, label = train_data[i]
-        net_input = mx.nd.array(data)
-        net_input = mx.nd.expand_dims(net_input, axis=0)
-        state_input = mx.nd.array(state)
-        state_input = mx.nd.expand_dims(state_input, axis=0)
-        pred = net(net_input, state_input).asnumpy()[0]
+    eval_metric = ["mse", AlongTrackError(name="ate"), CrossTrackError(name="cte"), Displacement(name="dpm")]
+    if not isinstance(eval_metric, mx.metric.EvalMetric):
+        eval_metric = mx.metric.create(eval_metric)
 
-        avg_dist = np.linalg.norm(pred.reshape([-1, 2]) - label.reshape([-1, 2]), axis=1).mean()
+    eval_data = mx.gluon.data.DataLoader(dataset=eval_dataset, batch_size=1)
+    for i, (data, state, label) in enumerate(eval_data):
+        pred = net(data, state)
+        eval_metric.update(labels=label, preds=pred)
+        img = np.array(data[0].asnumpy()[2] * 60, dtype=np.uint8)
+        img += (data[0].asnumpy()[0] * 30).astype(np.uint8)
 
-        img = np.transpose(data, (1, 2, 0))
-        img = np.array(img, dtype=np.uint8)
-        img = cv.cvtColor(img, cv.COLOR_BGR2HSV)
+        pred = pred.asnumpy()
+        label = label.asnumpy()
+        for j in range(horizon):
+            pixel = (data.shape[3] / 2 - int(pred[0, j * 2 + 1] / resolution),
+                     data.shape[2] / 2 - int(pred[0, j * 2] / resolution))
+            cv.circle(img, pixel, 6, (255), -1)
 
-        for j in range(30):
-            pixel = (250 - int(pred[j * 2 + 1] / 0.2), 250 - int(pred[j * 2] / 0.2))
-            cv.circle(img, pixel, 6, (75, 255, 150 + j * 22), -1)
+        for j in range(horizon):
+            pixel = (data.shape[3] / 2 - int(label[0, j * 2 + 1] / resolution),
+                     data.shape[2] / 2 - int(label[0, j * 2] / resolution))
+            cv.circle(img, pixel, 6, (100))
 
-        for j in range(30):
-            pixel = (250 - int(label[j * 2 + 1] / 0.2), 250 - int(label[j * 2] / 0.2))
-            cv.circle(img, pixel, 6, (120, 255, 150 + j * 22))
-        img = cv.cvtColor(img, cv.COLOR_HSV2BGR)
-        cv.putText(img, "Avg dist: %.3f" % avg_dist, (50, 50), cv.FONT_HERSHEY_COMPLEX, 1, (200, 100, 120))
+        name_value = eval_metric.get_name_value()
+        for j, (name, value) in enumerate(name_value):
+            cv.putText(img, "%s=%.4f" % (name, value), (50, 50 * j), cv.FONT_HERSHEY_COMPLEX, 1, (200, 100, 120))
         cv.imshow("test", img)
         cv.waitKey(0)
 

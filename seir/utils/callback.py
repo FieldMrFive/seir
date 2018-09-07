@@ -26,38 +26,37 @@ class Speedometer(object):
     Epoch[0] Batch [30] Speed: 1740.59 samples/sec  Train-accuracy=0.500000
     """
     def __init__(self, batch_size, frequent=50, logger=logging.getLogger(), auto_reset=True):
-        self.batch_size = batch_size
-        self.frequent = frequent
-        self.init = False
-        self.tic = 0
-        self.last_count = 0
-        self.auto_reset = auto_reset
-        self.logger = logger
+        self._batch_size = batch_size
+        self._frequent = frequent
+        self._init = False
+        self._tic = 0
+        self._last_count = 0
+        self._auto_reset = auto_reset
+        self._logger = logger
 
     def __call__(self, param):
         """Callback to Show speed."""
         count = param.nbatch
-        if self.last_count > count:
-            self.init = False
-        self.last_count = count
+        if self._last_count > count:
+            self._init = False
+        self._last_count = count
 
-        if self.init:
-            if count % self.frequent == 0:
-                speed = self.frequent * self.batch_size / (time.time() - self.tic)
+        if self._init:
+            if count % self._frequent == 0:
+                speed = self._frequent * self._batch_size / (time.time() - self._tic)
                 if param.eval_metric is not None:
                     name_value = param.eval_metric.get_name_value()
-                    if self.auto_reset:
+                    if self._auto_reset:
                         param.eval_metric.reset()
-                    msg = 'Epoch[%d] Batch [%d]\tSpeed: %.2f samples/sec'
-                    msg += '\t%s=%f'*len(name_value)
-                    self.logger.info(msg, param.epoch, count, speed, *sum(name_value, ()))
+                    msg = 'Epoch[%d] Batch [%d]\tSpeed: %.2f samples/sec' + '\t%s=%f'*len(name_value)
+                    self._logger.info(msg, param.epoch, count, speed, *sum(name_value, ()))
                 else:
-                    self.logger.info("Iter[%d] Batch [%d]\tSpeed: %.2f samples/sec",
-                                     param.epoch, count, speed)
-                self.tic = time.time()
+                    self._logger.info("Iter[%d] Batch [%d]\tSpeed: %.2f samples/sec",
+                                      param.epoch, count, speed)
+                self._tic = time.time()
         else:
-            self.init = True
-            self.tic = time.time()
+            self._init = True
+            self._tic = time.time()
 
 
 class CheckpointManager(object):

@@ -9,7 +9,7 @@ from pprint import pformat
 from seir.core import Trainer
 from seir.data import RasterImageDataset
 from seir.models import MobileNetV2
-from seir.utils import Speedometer, CheckpointManager, load_yaml
+from seir.utils import *
 
 
 def train(cfg_yaml, gpus, log_level):
@@ -46,10 +46,29 @@ def train(cfg_yaml, gpus, log_level):
     # load iterator
     train_data = RasterImageDataset(data_dir=params_config["dataset"]["data_dir"],
                                     data_lst_file=params_config["dataset"]["train_data_lst"])
+    valid_data = RasterImageDataset(data_dir=params_config["dataset"]["data_dir"],
+                                    data_lst_file=params_config["dataset"]["valid_data_lst"])
     multi_gpus_batch_size = params_config["train"]["batch_size"] * len(ctx)
 
     # Generate and save model
-    net = MobileNetV2(config=params_config["mobilenet_v2"])
+    checkpoint_prefix = os.path.join(checkpoint_dir, params_config["misc"]["checkpoint_prefix"])
+    newest = None
+    if os.path.exists(checkpoint_prefix + "-symbol.json"):
+        for filename in os.listdir(checkpoint_dir):
+            name, ext = os.path.splitext(filename)
+            if ext != ".params":
+                continue
+            checkpoint_num = int(name.split("-")[1])
+            if newest is None or newest < checkpoint_num:
+                newest = checkpoint_num
+
+        net = mx.gluon.nn.SymbolBlock.imports(symbol_file=checkpoint_prefix + "-symbol.json",
+                                              input_names=["data0", "data1"],
+                                              param_file=checkpoint_prefix + "-%04d.params" % newest,
+                                              ctx=ctx)
+        logger.info("Load model at Epoch[%d]", newest)
+    else:
+        net = MobileNetV2(config=params_config["mobilenet_v2"])
     net.hybridize()
 
     optimizer_cfg = params_config["train"]["optimizer"]
@@ -66,7 +85,7 @@ def train(cfg_yaml, gpus, log_level):
     if optimizer == "sgd":
         optimizer_params.update({"momentum": optimizer_cfg["momentum"]})
 
-    batch_end_callback = Speedometer(batch_size=params_config["train"]["batch_size"],
+    batch_end_callback = Speedometer(batch_size=multi_gpus_batch_size,
                                      frequent=params_config["train"]["log_frequent"],
                                      logger=logger)
     epoch_end_callback = CheckpointManager(path=checkpoint_dir,
@@ -76,16 +95,17 @@ def train(cfg_yaml, gpus, log_level):
                                            logger=logger)
     initializer = mx.init.Xavier(rnd_type='gaussian', factor_type='in', magnitude=2)
 
-    eval_metric = ['mse']
+    eval_metric = ["mse", AlongTrackError(name="ate"), CrossTrackError(name="cte"), Displacement(name="dpm")]
     loss = mx.gluon.loss.L2Loss()
 
     # set trainer
     trainer = Trainer(net=net,
                       train_dataset=train_data,
+                      valid_dataset=valid_data,
                       batch_size=multi_gpus_batch_size,
                       shuffle=True,
                       ctx=ctx,
-                      begin_epoch=params_config["train"]["begin_epoch"],
+                      begin_epoch=params_config["train"]["begin_epoch"] if newest is None else newest + 1,
                       end_epoch=params_config["train"]["end_epoch"],
                       logger=logger)
 
